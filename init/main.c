@@ -90,7 +90,6 @@
 #include <linux/rodata_test.h>
 
 #include <asm/io.h>
-#include <asm/bugs.h>
 #include <asm/setup.h>
 #include <asm/sections.h>
 #include <asm/cacheflush.h>
@@ -494,31 +493,6 @@ void __init __weak thread_stack_cache_init(void)
 }
 #endif
 
-void __init __weak mem_encrypt_init(void) { }
-
-/* Report memory auto-initialization states for this boot. */
-static void __init report_meminit(void)
-{
-	const char *stack;
-
-	if (IS_ENABLED(CONFIG_INIT_STACK_ALL))
-		stack = "all";
-	else if (IS_ENABLED(CONFIG_GCC_PLUGIN_STRUCTLEAK_BYREF_ALL))
-		stack = "byref_all";
-	else if (IS_ENABLED(CONFIG_GCC_PLUGIN_STRUCTLEAK_BYREF))
-		stack = "byref";
-	else if (IS_ENABLED(CONFIG_GCC_PLUGIN_STRUCTLEAK_USER))
-		stack = "__user";
-	else
-		stack = "off";
-
-	pr_info("mem auto-init: stack:%s, heap alloc:%s, heap free:%s\n",
-		stack, want_init_on_alloc(GFP_KERNEL) ? "on" : "off",
-		want_init_on_free() ? "on" : "off");
-	if (want_init_on_free())
-		pr_info("mem auto-init: clearing system memory may take some time...\n");
-}
-
 /*
  * Set up kernel memory allocators
  */
@@ -529,7 +503,6 @@ static void __init mm_init(void)
 	 * bigger than MAX_ORDER unless SPARSEMEM.
 	 */
 	page_ext_init_flatmem();
-	report_meminit();
 	mem_init();
 	kmem_cache_init();
 	pgtable_init();
@@ -694,14 +667,6 @@ asmlinkage __visible void __init start_kernel(void)
 	 */
 	locking_selftest();
 
-	/*
-	 * This needs to be called before any devices perform DMA
-	 * operations that might use the SWIOTLB bounce buffers. It will
-	 * mark the bounce buffers as decrypted so that their usage will
-	 * not cause "plain-text" data to be decrypted when accessed.
-	 */
-	mem_encrypt_init();
-
 #ifdef CONFIG_BLK_DEV_INITRD
 	if (initrd_start && !initrd_below_start_ok &&
 	    page_to_pfn(virt_to_page((void *)initrd_start)) < min_low_pfn) {
@@ -718,6 +683,9 @@ asmlinkage __visible void __init start_kernel(void)
 	if (late_time_init)
 		late_time_init();
 	calibrate_delay();
+
+	arch_cpu_finalize_init();
+
 	pidmap_init();
 	anon_vma_init();
 	acpi_early_init();
@@ -745,12 +713,6 @@ asmlinkage __visible void __init start_kernel(void)
 	init_sync_kmem_pool();
 	init_dma_buf_kmem_pool();
 
-//#ifdef OPLUS_FEATURE_PHOENIX
-	// Kun.Hu@PSW.TECH.RELIABILTY, 2018/11/15, add for project phoenix(hang oppo)
-	if(phx_set_boot_stage)
-		phx_set_boot_stage(KERNEL_DELAYACCT_INIT_DONE);
-//#endif
-	check_bugs();
 
 	acpi_subsystem_init();
 	arch_post_acpi_subsys_init();
