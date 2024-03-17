@@ -1,171 +1,189 @@
 #!/bin/bash
 
-#set -e
+# Script version
+SCRIPT_VERSION="1.0"
 
- #
- # Script For Building Android Kernel
- #
+set -e
 
-##----------------------------------------------------------##
-
+# Define global variables
 SRC="$(pwd)"
-
-# Cache
-export CCACHE_EXEC="/usr/bin/ccache"
-export USE_CCACHE=1
-ccache -M 5G
-export CCACHE_COMPRESS=1
-export CCACHE_DIR=$(whoami)/ccache/.ccache
-
-# Config
-KERNEL_DEFCONFIG=atoll_defconfig
-
-# Kernel version
-DEVICE=RMX2061
-VERSION=Alfea
-
-# Zipping
-DATE=$(TZ=Asia/Kolkata date +"%Y%m%d-%T")
-TANGGAL=$(date +"%F%S")
+PROTON_PATH="$SRC/proton/bin:$PATH"
 ANYKERNEL3_DIR=AnyKernel3
-FINAL_KERNEL_ZIP=${VERSION}-${DEVICE}-${TANGGAL}.zip
+FINAL_KERNEL_ZIP=""
+BUILD_START=""
+DEVICE=RMX2061
+VERSION=v4.14.323
+CHAT_ID=-4121496844
+KERNEL_DEFCONFIG=atoll_defconfig  # Defining the configuration to be used for kernel build
 
-##----------------------------------------------------------##
+# Function to clone Proton clang if not found
+clone_proton_clang() {
+    if [ ! -d "$PROTON_PATH" ]; then
+        echo "Proton clang not found at $PROTON_PATH! Cloning..."
+        if ! git clone -q https://github.com/kdrag0n/proton-clang.git --depth=1 --single-branch "$PROTON_PATH"; then
+            echo "Cloning failed! Aborting..."
+            exit 1
+        fi
+    else
+        echo "Proton clang found at $PROTON_PATH"
+    fi
+}
 
-# Exports
-export PATH="$SRC/proton/bin:$PATH"
-export ARCH=arm64
-export SUBARCH=arm64
-export KBUILD_COMPILER_STRING="$($SRC/proton/bin/clang --version | head -n 1 | perl -pe 's/\(http.*?\)//gs' | sed -e 's/  */ /g' -e 's/[[:space:]]*$//')"
+# Function to set environment variables
+set_env_variables() {
+    export PATH="$PROTON_PATH/bin:$PATH"
+    export ARCH=arm64
+    export SUBARCH=arm64
+    export KBUILD_COMPILER_STRING="$($PROTON_PATH/bin/clang --version | head -n 1 | perl -pe 's/\(http.*?\)//gs' | sed -e 's/  */ /g' -e 's/[[:space:]]*$//')"
+}
 
-if ! [ -d "$SRC/proton" ]; then
-echo "Proton clang not found! Cloning..."
-if ! git clone -q https://github.com/kdrag0n/proton-clang --depth=1 --single-branch $SRC/proton; then
-echo "Cloning failed! Aborting..."
-exit 1
-fi
-fi
+# Function to perform clean build
+perform_clean_build() {
+    echo "Performing clean build..."
+    make clean
+    rm -rf *.zip
+    rm -rf *.log
+}
 
-# General cleanup
-make clean
-rm -rf *.zip
-rm -rf *.log
-##----------------------------------------------------------##
+# Function to build the kernel
+build_kernel() {
+    echo "**** Kernel defconfig is set to $KERNEL_DEFCONFIG ****"
+    echo -e "$blue***********************************************"
+    echo "          BUILDING ALFEA KERNEL          "
+    echo -e "***********************************************$nocol"
+    make $KERNEL_DEFCONFIG O=out
+    make -j$(nproc --all) O=out \
+                          ARCH=arm64 \
+                          CC=clang \
+                          CROSS_COMPILE=aarch64-linux-gnu- \
+                          CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
+                          NM=llvm-nm \
+                          OBJCOPY=llvm-objcopy \
+                          OBJDUMP=llvm-objdump \
+                          STRIP=llvm-strip \
+                          V=$VERBOSE 2>&1 | tee error.log
+}
 
-# Start build
-BUILD_START=$(date +"%s")
-blue='\033[0;34m'
-cyan='\033[0;36m'
-yellow='\033[0;33m'
-red='\033[0;31m'
-nocol='\033[0m'
+# Function to verify kernel build
+verify_kernel_build() {
+    echo "**** Verify Image.gz & dtbo.img ****"
+    ls $PWD/out/arch/arm64/boot/Image.gz
+    ls $PWD/out/arch/arm64/boot/dtbo.img
+    ls $PWD/out/arch/arm64/boot/dtb.img
 
-# Clean build always lol
-echo -e "$red***********************************************"
-echo "          STARTING THE ENGINE         "
-echo -e "***********************************************$nocol"
+    if ! [ -a "$SRC/out/arch/arm64/boot/Image.gz" ]; then
+        echo -e "$blue***********************************************"
+        echo "          BUILD THROWS ERRORS         "
+        echo -e "***********************************************$nocol"
+        for i in *.log; do
+            curl -F "document=@$i" --form-string "caption=" "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}&parse_mode=HTML"
+        done
+        rm -rf error.log
+        exit 1
+    else
+        echo -e "$blue***********************************************"
+        echo "    KERNEL COMPILATION FINISHED, STARTING ZIPPING         "
+        echo -e "***********************************************$nocol"
+        rm -rf error.log
+    fi
+}
 
-echo "**** Kernel defconfig is set to $KERNEL_DEFCONFIG ****"
-echo -e "$blue***********************************************"
-echo "          BUILDING ALFEA              "
-echo -e "***********************************************$nocol"
-make $KERNEL_DEFCONFIG O=out
-make -j$(nproc --all) O=out \
-                      ARCH=arm64 \
-                      CC=clang \
-                      CROSS_COMPILE=aarch64-linux-gnu- \
-                      CROSS_COMPILE_ARM32=arm-linux-gnueabi- \
-                      NM=llvm-nm \
-                      OBJCOPY=llvm-objcopy \
-                      OBJDUMP=llvm-objdump \
-                      STRIP=llvm-strip \
-			          V=$VERBOSE 2>&1 | tee error.log                      
+# Function to zip kernel files
+zip_kernel_files() {
+    echo "**** Verifying AnyKernel3 Directory ****"
 
-##----------------------------------------------------------##
+    if [ ! -d "$SRC/AnyKernel3" ]; then
+        git clone --depth=1 https://github.com/CxDxVER/AnyKernel3.git AnyKernel3
+    else
+        echo " "
+    fi
 
-# Verify Files
+    # Anykernel 3 time!!
+    ls $ANYKERNEL3_DIR
 
-echo "**** Verify Image.gz & dtbo.img ****"
-ls $PWD/out/arch/arm64/boot/Image.gz
-ls $PWD/out/arch/arm64/boot/dtbo.img
-ls $PWD/out/arch/arm64/boot/dtb.img
+    echo "**** Copying Image.gz & dtbo.img ****"
+    cp $PWD/out/arch/arm64/boot/Image.gz $ANYKERNEL3_DIR/
+    cp $PWD/out/arch/arm64/boot/dtbo.img $ANYKERNEL3_DIR/
+    cp $PWD/out/arch/arm64/boot/dtb.img $ANYKERNEL3_DIR/
 
-       if ! [ -a "$SRC/out/arch/arm64/boot/Image.gz" ];
-          then
-              echo -e "$blue***********************************************"
-              echo "          BUILD THROWS ERRORS         "
-              echo -e "***********************************************$nocol"
-              for i in *.log
-              do
-              curl -F "document=@$i" --form-string "caption=" "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}&parse_mode=HTML"
-              done
-              rm -rf error.log
-              exit 1
-          else
-             echo -e "$blue***********************************************"
-             echo "    KERNEL COMPILATION FINISHED, STARTING ZIPPING         "
-             echo -e "***********************************************$nocol"
-             rm -rf error.log 
-       fi
+    echo -e "$cyan***********************************************"
+    echo "          Time to zip up!          "
+    echo -e "***********************************************$nocol"
+    cd $ANYKERNEL3_DIR/
+    FINAL_KERNEL_ZIP=${VERSION}-${DEVICE}-$(date +"%F%S").zip
+    zip -r9 "../$FINAL_KERNEL_ZIP" * -x README $FINAL_KERNEL_ZIP
+}
 
-##----------------------------------------------------------##
+# Function to compute SHA1 checksum
+compute_checksum() {
+    echo -e "$yellow***********************************************"
+    echo "         Done, here is your sha1         "
+    echo -e "***********************************************$nocol"
+    cd ..
+    sha1sum $FINAL_KERNEL_ZIP
+}
 
-echo "**** Verifying AnyKernel3 Directory ****"
+# Function to upload kernel to Telegram
+upload_kernel_to_telegram() {
+    echo -e "$red***********************************************"
+    echo "         Uploading to telegram         "
+    echo -e "***********************************************$nocol"
 
-if [ ! -d "$SRC/AnyKernel3" ];
-then
-   git clone --depth=1 https://github.com/CxDxVER/AnyKernel3.git AnyKernel3
-else
-   echo " "
-fi
+    # Upload Time!!
+    for i in *.zip; do
+        curl -F "document=@$i" --form-string "caption=" "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}&parse_mode=HTML"
+    done
+}
 
-# Anykernel 3 time!!
-ls $ANYKERNEL3_DIR
+# Function to clean up
+clean_up() {
+    echo -e "$cyan***********************************************"
+    echo "          All done !!!         "
+    echo -e "***********************************************$nocol"
+    rm -rf $ANYKERNEL3_DIR
+}
 
-echo "**** Copying Image.gz & dtbo.img ****"
-cp $PWD/out/arch/arm64/boot/Image.gz $ANYKERNEL3_DIR/
-cp $PWD/out/arch/arm64/boot/dtbo.img $ANYKERNEL3_DIR/
-cp $PWD/out/arch/arm64/boot/dtb.img $ANYKERNEL3_DIR/
+# Function to ask whether to perform a clean build
+ask_clean_build() {
+    read -p "Do you want to perform a clean build? (y/n): " clean_build
+    if [[ $clean_build =~ ^[Yy]$ ]]; then
+        perform_clean_build
+    else
+        echo "Skipping clean build..."
+    fi
+}
 
-echo -e "$cyan***********************************************"
-echo "          Time to zip up!          "
-echo -e "***********************************************$nocol"
-cd $ANYKERNEL3_DIR/
-zip -r9 "../$FINAL_KERNEL_ZIP" * -x README $FINAL_KERNEL_ZIP
+# Function to review build logs for warnings and errors
+review_logs() {
+    echo "Reviewing build logs for warnings and errors..."
+    if grep -q '\(warning\|error\):' error.log; then
+        echo -e "Build log contains warnings or errors:"
+        grep -E '(warning|error):' error.log
+        # You can add additional actions here, such as fixing warnings/errors automatically.
+    else
+        echo -e "No warnings or errors found in the build log."
+    fi
+}
 
-echo -e "$yellow***********************************************"
-echo "         Done, here is your sha1         "
-echo -e "***********************************************$nocol"
-cd ..
+# Main function
+main() {
+    clone_proton_clang
+    set_env_variables
+    ask_clean_build
 
-sha1sum $FINAL_KERNEL_ZIP
+    BUILD_START=$(date +"%s")
+    build_kernel
+    verify_kernel_build
+    zip_kernel_files
+    compute_checksum
+    upload_kernel_to_telegram
+    clean_up
+    review_logs
 
-##----------------------------------------------------------##
-##----------------------------------------------------------##
-##----------------------------------------------------------##
+    BUILD_END=$(date +"%s")
+    DIFF=$(($BUILD_END - $BUILD_START))
+    echo -e "$yellow Build completed in $(($DIFF / 60)) minute(s) and $(($DIFF % 60)) seconds.$nocol"
+}
 
-BUILD_END=$(date +"%s")
-DIFF=$(($BUILD_END - $BUILD_START))
-echo -e "$yellow Build completed in $(($DIFF / 60)) minute(s) and $(($DIFF % 60)) seconds.$nocol"
-
-##----------------------------------------------------------##
-##----------------------------------------------------------##
-##----------------------------------------------------------##
-
-echo -e "$red***********************************************"
-echo "         Uploading to telegram         "
-echo -e "***********************************************$nocol"
-
-# Upload Time!!
-for i in *.zip
-do
-curl -F "document=@$i" --form-string "caption=" "https://api.telegram.org/bot${BOT_TOKEN}/sendDocument?chat_id=${CHAT_ID}&parse_mode=HTML"
-done
-
-echo -e "$cyan***********************************************"
-echo "          All done !!!         "
-echo -e "***********************************************$nocol"
-rm -rf $ANYKERNEL3_DIR
-##----------------------------------------------------------##
-##----------------------------------------------------------##
-##----------------------------------------------------------##
+# Call main function
+main
