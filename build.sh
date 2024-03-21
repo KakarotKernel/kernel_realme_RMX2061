@@ -7,14 +7,15 @@ set -e
 
 # Define global variables
 SRC="$(pwd)"
-PROTON_PATH="$SRC/proton/bin:$PATH"
+PROTON_PATH="$SRC/proton/"
 ANYKERNEL3_DIR=AnyKernel3
 FINAL_KERNEL_ZIP=""
 BUILD_START=""
 DEVICE=RMX2061
 VERSION=v4.14.323
-CHAT_ID=-4121496844
-KERNEL_DEFCONFIG=atoll_defconfig  # Defining the configuration to be used for kernel build
+BOT_TOKEN="6689973098:AAE0XHvBs6NDcaKJO6CZ5jmlwhIXe4hi2q4"
+CHAT_ID="-4121496844"
+KERNEL_DEFCONFIG=atoll_defconfig
 
 # Function to clone Proton clang if not found
 clone_proton_clang() {
@@ -41,9 +42,25 @@ set_env_variables() {
 perform_clean_build() {
     echo "Performing clean build..."
     make clean
+    make mrproper
     rm -rf *.zip
     rm -rf *.log
 }
+
+# Function to build with KernelSU
+#build_with_kernelsu() {
+#    echo "Building with KernelSU..."
+#    git apply applyKSU.patch
+#    git submodule add --force https://github.com/tiann/KernelSU.git KernelSU
+#}
+
+# Function to ask whether to build with KernelSU
+#ask_build_with_kernelsu() {
+#    read -p "Do you want to build with KernelSU? (y/n): " build_kernelsu
+#    if [[ $build_kernelsu =~ ^[Yy]$ ]]; then
+#        build_with_kernelsu
+#    fi
+#}
 
 # Function to build the kernel
 build_kernel() {
@@ -51,6 +68,7 @@ build_kernel() {
     echo -e "$blue***********************************************"
     echo "          BUILDING ALFEA KERNEL          "
     echo -e "***********************************************$nocol"
+#    make mrproper && make clean
     make $KERNEL_DEFCONFIG O=out
     make -j$(nproc --all) O=out \
                           ARCH=arm64 \
@@ -110,7 +128,7 @@ zip_kernel_files() {
     echo "          Time to zip up!          "
     echo -e "***********************************************$nocol"
     cd $ANYKERNEL3_DIR/
-    FINAL_KERNEL_ZIP=${VERSION}-${DEVICE}-$(date +"%F%S").zip
+    FINAL_KERNEL_ZIP=Alfea-${VERSION}-${DEVICE}-$(date +"%F%S").zip
     zip -r9 "../$FINAL_KERNEL_ZIP" * -x README $FINAL_KERNEL_ZIP
 }
 
@@ -153,32 +171,19 @@ ask_clean_build() {
     fi
 }
 
-# Function to review build logs for warnings and errors
-review_logs() {
-    echo "Reviewing build logs for warnings and errors..."
-    if grep -q '\(warning\|error\):' error.log; then
-        echo -e "Build log contains warnings or errors:"
-        grep -E '(warning|error):' error.log
-        # You can add additional actions here, such as fixing warnings/errors automatically.
-    else
-        echo -e "No warnings or errors found in the build log."
-    fi
-}
-
 # Main function
 main() {
     clone_proton_clang
     set_env_variables
     ask_clean_build
-
     BUILD_START=$(date +"%s")
+    #ask_build_with_kernelsu
     build_kernel
     verify_kernel_build
     zip_kernel_files
     compute_checksum
     upload_kernel_to_telegram
     clean_up
-    review_logs
 
     BUILD_END=$(date +"%s")
     DIFF=$(($BUILD_END - $BUILD_START))
