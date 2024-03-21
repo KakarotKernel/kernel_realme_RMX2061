@@ -22,13 +22,13 @@ KERNEL_DEFCONFIG=atoll_defconfig
 
 # Kernel version
 DEVICE=RMX2061
-VERSION=MUICHIRO-M1
+VERSION=Alfea
 
 # Zipping
 DATE=$(TZ=Asia/Kolkata date +"%Y%m%d-%T")
 TANGGAL=$(date +"%F%S")
 ANYKERNEL3_DIR=AnyKernel3
-FINAL_KERNEL_ZIP=KKRT-${VERSION}-${DEVICE}-${TANGGAL}.zip
+FINAL_KERNEL_ZIP=${VERSION}-${DEVICE}-${TANGGAL}.zip
 
 ##----------------------------------------------------------##
 
@@ -67,7 +67,7 @@ echo -e "***********************************************$nocol"
 
 echo "**** Kernel defconfig is set to $KERNEL_DEFCONFIG ****"
 echo -e "$blue***********************************************"
-echo "          BUILDING KAKAROT KERNEL          "
+echo "          BUILDING ALFEA              "
 echo -e "***********************************************$nocol"
 make $KERNEL_DEFCONFIG O=out
 make -j$(nproc --all) O=out \
@@ -114,7 +114,7 @@ echo "**** Verifying AnyKernel3 Directory ****"
 
 if [ ! -d "$SRC/AnyKernel3" ];
 then
-   git clone --depth=1 https://github.com/neel0210/AnyKernel3.git -b MUICHIRO AnyKernel3
+   git clone --depth=1 https://github.com/CxDxVER/AnyKernel3.git AnyKernel3
 else
    echo " "
 fi
